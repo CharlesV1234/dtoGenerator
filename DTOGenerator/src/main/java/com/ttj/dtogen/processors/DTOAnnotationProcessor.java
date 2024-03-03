@@ -17,8 +17,10 @@ import java.io.Writer;
 import java.text.MessageFormat;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.Map;
+import java.util.HashMap;
 
-public class DTOAnnotationProcessor extends AbstractProcessor{
+public class DTOAnnotationProcessor extends AbstractProcessor {
     private Types typeUtils;
     private Elements elementUtils;
     private Filer filer;
@@ -32,56 +34,81 @@ public class DTOAnnotationProcessor extends AbstractProcessor{
         filer = processingEnv.getFiler();
         messager = processingEnv.getMessager();
     }
-    private String getValue(String value, String defaultValue){
-        if(value==null || value.length()<1)
+
+    private String getValue(String value, String defaultValue) {
+        if (value == null || value.length() < 1)
             return defaultValue;
         else
             return value;
     }
-    private String[] getClassDetails(DtoClass classAnnotation, TypeElement classElem){
-        String[] classDetails = new String[2];
+
+    private Map<String, String> getClassDetails(DtoClass classAnnotation, TypeElement classElem) {
+        Map<String, String> classDetails = new HashMap<>();
         String parentQualifiedClassName = classElem.getQualifiedName().toString();
         String parentClassName = classElem.getSimpleName().toString();
         String parentPackage = parentQualifiedClassName.substring(0, parentQualifiedClassName.indexOf(parentClassName));
-        //set package details
-        classDetails[0] = getValue(classAnnotation.classPackage(), (parentPackage==null?"":parentPackage)+"dto");
-        //set class name
-        classDetails[1] = getValue(classAnnotation.name(), parentClassName+"Dto");
+        // set package details
+        String packageDetails = getValue(classAnnotation.classPackage(), (parentPackage == null ? "" : parentPackage));
+        if (packageDetails.endsWith(".")) {
+            packageDetails = packageDetails.substring(0, packageDetails.lastIndexOf('.'));
+        }
+        packageDetails = packageDetails.replace("models", "dtos");
+        classDetails.put("packageDetails", packageDetails);
+        // set class name
+        classDetails.put("className", getValue(classAnnotation.name(), parentClassName + "Dto"));
+        // set superclass
+        String superClassPath = classElem.getSuperclass().toString();
+        if (!superClassPath.equals("java.lang.Object")) {
+
+            String superClass = superClassPath.substring(superClassPath.lastIndexOf('.') + 1) + "Dto";
+            superClassPath = superClassPath.replace("models", "dtos");
+            classDetails.put("superClass", superClass);
+            classDetails.put("superClassImport", superClassPath + "Dto");
+        }
 
         return classDetails;
     }
 
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnv) {
-        for(Element element : roundEnv.getElementsAnnotatedWith(DtoClass.class)){
+        for (Element element : roundEnv.getElementsAnnotatedWith(DtoClass.class)) {
             try {
                 DtoClass classAnnotation = element.getAnnotation(DtoClass.class);
 
-                String[] classDetails = getClassDetails(classAnnotation, (TypeElement)element);
-                String qualifiedGenClass = classDetails[0]+"."+classDetails[1];
+                Map<String, String> classDetails = getClassDetails(classAnnotation, (TypeElement) element);
+                String packageDetails = classDetails.get("packageDetails");
+                String className = classDetails.get("className");
+                String superClass = classDetails.get("superClass");
+                String superClassImport = classDetails.get("superClassImport");
+                String qualifiedGenClass = packageDetails + "." + className;
+
                 JavaFileObject javaFileObject = filer.createSourceFile(qualifiedGenClass);
 
-                if(new File(javaFileObject.toUri()).exists()) {
+                if (new File(javaFileObject.toUri()).exists()) {
                     continue;
                 }
 
                 Writer writer = javaFileObject.openWriter();
 
-                JavaFileBuilder javaFileBuilder = new JavaFileBuilder(classDetails[1], classDetails[0]);
+                JavaFileBuilder javaFileBuilder = new JavaFileBuilder();
+                javaFileBuilder.setPackageName(packageDetails);
+                javaFileBuilder.setClassName(className);
+                javaFileBuilder.setSuperClass(superClass);
+                javaFileBuilder.setSuperClassImport(superClassImport);
 
-                //iterating through annotated fields
-                for(Element fieldElem : element.getEnclosedElements()){
+                // iterating through annotated fields
+                for (Element fieldElem : element.getEnclosedElements()) {
                     DtoProperty propAnnotation = fieldElem.getAnnotation(DtoProperty.class);
                     String fieldName = null;
                     String fieldType = null;
                     boolean isGetter = true, isSetter = true;
-                    if(propAnnotation!=null) {
+                    if (propAnnotation != null) {
                         fieldName = propAnnotation.name();
                         isGetter = propAnnotation.getter();
                         isSetter = propAnnotation.setter();
                     }
-                    if(propAnnotation!=null || classAnnotation.includeAllFields()) {
-                        if(fieldElem instanceof VariableElement) {
+                    if (propAnnotation != null || classAnnotation.includeAllFields()) {
+                        if (fieldElem instanceof VariableElement) {
                             if (fieldName == null || fieldName.length() < 1) {
                                 fieldName = fieldElem.getSimpleName().toString();
                             }
@@ -96,7 +123,7 @@ public class DTOAnnotationProcessor extends AbstractProcessor{
                 }
                 writer.write(javaFileBuilder.toClassCodeString());
                 writer.close();
-            }catch(Exception e){
+            } catch (Exception e) {
                 e.printStackTrace();
                 messager.printMessage(Diagnostic.Kind.ERROR, e.getMessage());
             }

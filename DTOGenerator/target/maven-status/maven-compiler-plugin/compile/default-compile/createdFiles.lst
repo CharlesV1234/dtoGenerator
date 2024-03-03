@@ -1,0 +1,4 @@
+com\ttj\dtogen\annotations\DtoProperty.class
+com\ttj\dtogen\annotations\DtoClass.class
+com\ttj\dtogen\processors\DTOAnnotationProcessor.class
+com\ttj\dtogen\utils\JavaFileBuilder.class
